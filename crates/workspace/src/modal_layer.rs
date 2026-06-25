@@ -1,6 +1,6 @@
 use gpui::{
-    AnyView, App, DismissEvent, Entity, EventEmitter, FocusHandle, Global, ManagedView, MouseButton,
-    Subscription, WeakFocusHandle,
+    AnyView, App, DismissEvent, Entity, EventEmitter, FocusHandle, Global, ManagedView,
+    MouseButton, Subscription, WeakFocusHandle,
 };
 use ui::prelude::*;
 
@@ -243,8 +243,7 @@ impl ModalLayer {
         }
 
         if let Some(active_modal) = self.active_modal.take() {
-            let reopenable =
-                focus_handle_is_reopenable(&active_modal.modal.focus_handle(cx), cx);
+            let reopenable = focus_handle_is_reopenable(&active_modal.modal.focus_handle(cx), cx);
             if let Some(previous_focus) = active_modal.previous_focus_handle
                 && active_modal.focus_handle.contains_focused(window, cx)
             {

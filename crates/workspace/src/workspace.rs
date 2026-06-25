@@ -14157,9 +14157,9 @@ mod tests {
             workspace.toggle_modal(window, cx, TestModal::new);
         });
         cx.executor().run_until_parked();
-        assert!(workspace.read_with(cx, |workspace, cx| workspace
-            .active_modal::<TestModal>(cx)
-            .is_some()));
+        assert!(workspace.read_with(cx, |workspace, cx| {
+            workspace.active_modal::<TestModal>(cx).is_some()
+        }));
         workspace.update_in(cx, |workspace, window, cx| {
             let revealed = workspace.modal_layer.update(cx, |modal_layer, cx| {
                 modal_layer.hide_modal(window, cx);
@@ -14186,13 +14186,13 @@ mod tests {
                 .update(cx, |modal_layer, cx| modal_layer.hide_modal(window, cx));
         });
         cx.executor().run_until_parked();
-        assert!(workspace.read_with(cx, |workspace, cx| workspace
-            .active_modal::<ReopenableTestModal>(cx)
-            .is_none()));
+        assert!(workspace.read_with(cx, |workspace, cx| {
+            workspace.active_modal::<ReopenableTestModal>(cx).is_none()
+        }));
         workspace.update_in(cx, |workspace, window, cx| {
-            let revealed = workspace
-                .modal_layer
-                .update(cx, |modal_layer, cx| modal_layer.reveal_stashed_modal(window, cx));
+            let revealed = workspace.modal_layer.update(cx, |modal_layer, cx| {
+                modal_layer.reveal_stashed_modal(window, cx)
+            });
             assert!(revealed, "a reopenable modal should be revealable");
         });
         cx.executor().run_until_parked();
@@ -14209,9 +14209,9 @@ mod tests {
 
         // Revealing again while that modal is open is a no-op.
         workspace.update_in(cx, |workspace, window, cx| {
-            let revealed = workspace
-                .modal_layer
-                .update(cx, |modal_layer, cx| modal_layer.reveal_stashed_modal(window, cx));
+            let revealed = workspace.modal_layer.update(cx, |modal_layer, cx| {
+                modal_layer.reveal_stashed_modal(window, cx)
+            });
             assert!(!revealed, "reveal should be a no-op while a modal is open");
         });
 
@@ -14230,7 +14230,10 @@ mod tests {
                 modal_layer.hide_modal(window, cx);
                 modal_layer.reveal_stashed_modal(window, cx)
             });
-            assert!(revealed, "a non-reopenable modal must not discard the stash");
+            assert!(
+                revealed,
+                "a non-reopenable modal must not discard the stash"
+            );
         });
         cx.executor().run_until_parked();
 
