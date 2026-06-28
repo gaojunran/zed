@@ -1,0 +1,37 @@
+name: build_mac_dmg
+# Manually-triggered macOS bundle build for personal testing.
+# Runs on GitHub-hosted macOS runners (which ship full Xcode, including the
+# `metal` shader compiler) and needs no signing/notarization secrets:
+# `script/bundle-mac` falls back to an ad-hoc signature when they are absent.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target triple to build
+        type: choice
+        default: aarch64-apple-darwin
+        options:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+jobs:
+  bundle_mac:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Bundle macOS app
+      run: ./script/bundle-mac ${{ inputs.target }}
+    - name: Upload DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: Zed-${{ inputs.target }}.dmg
+        path: target/${{ inputs.target }}/release/Zed-*.dmg
+        if-no-files-found: error
