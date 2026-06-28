@@ -3,9 +3,16 @@ name: build_mac_dmg
 # Runs on GitHub-hosted macOS runners (which ship full Xcode, including the
 # `metal` shader compiler) and needs no signing/notarization secrets:
 # `script/bundle-mac` falls back to an ad-hoc signature when they are absent.
+#
+# This workflow lives only on the default branch. Use the `ref` input to pick
+# which branch/tag/SHA to build, so feature branches don't need to carry it.
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: Branch, tag, or SHA to build
+        type: string
+        default: inline-blame-diff-views
       target:
         description: Target triple to build
         type: choice
@@ -23,6 +30,8 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
