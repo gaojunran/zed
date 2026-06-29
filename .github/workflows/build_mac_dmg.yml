@@ -25,13 +25,20 @@ env:
   RUST_BACKTRACE: '1'
 jobs:
   bundle_mac:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       with:
         ref: ${{ inputs.ref }}
+    # The default Xcode on older runner images ships a libc++ that fails to
+    # compile webrtc-sys' cxx bridge (a C++20 ranges static_assert). Pick the
+    # newest stable Xcode, whose libc++ compiles it.
+    - name: Select Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
