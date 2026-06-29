@@ -23,18 +23,27 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: '0'
 jobs:
   bundle_mac:
     runs-on: macos-15
-    timeout-minutes: 90
+    # A from-scratch release build on a 3-core hosted runner is slow; give it
+    # plenty of headroom (the hard per-job cap is 6h).
+    timeout-minutes: 300
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       with:
         ref: ${{ inputs.ref }}
-    # The default Xcode on older runner images ships a libc++ that fails to
-    # compile webrtc-sys' cxx bridge (a C++20 ranges static_assert). Pick the
-    # newest stable Xcode, whose libc++ compiles it.
+    # Cache heavy external dependencies (webrtc, tree-sitter, abseil, ...) so
+    # repeat runs are much faster. The first successful run populates it.
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.target }}
+        cache-on-failure: 'true'
+    # macos-15's default libc++ compiles webrtc-sys' cxx bridge; older images
+    # (e.g. Xcode 15.4) fail a C++20 ranges static_assert. Pin latest stable.
     - name: Select Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
