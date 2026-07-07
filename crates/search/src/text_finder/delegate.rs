@@ -65,9 +65,8 @@ pub struct Delegate {
     /// derived from it for rendering.
     pub(crate) matches: Vec<SearchMatch>,
     /// Display rows derived from [`Self::matches`]: a non-selectable header per
-    /// file, its matches, and separators between groups. Rebuilt via
-    /// [`Delegate::rebuild_entries`] whenever `matches` changes. `selected_index`
-    /// indexes into this list.
+    /// file, its matches, and separators between groups. `selected_index` indexes
+    /// into this list.
     pub(crate) entries: Vec<Entry>,
     pub(crate) selected_index: usize,
     pub(crate) cancel_flag: Arc<AtomicBool>,
@@ -82,8 +81,7 @@ pub struct Delegate {
     pub(crate) in_progress_search: InProgressSearch,
     pub(crate) unique_files: HashSet<ProjectPath>,
     /// Largest line number across [`Self::matches`], used to size the line-number
-    /// column so every row's number right-aligns to the widest one. Recomputed in
-    /// [`Delegate::rebuild_entries`].
+    /// column so every row's number right-aligns to the widest one.
     pub(crate) max_line_number: u32,
     pub(crate) collapsed_paths: HashSet<ProjectPath>,
 }
@@ -181,8 +179,7 @@ async fn stream_plunder_to_picker(
             delegate
                 .unique_files
                 .extend(new_matches.iter().map(|m| m.path.clone()));
-            delegate.matches.extend(new_matches);
-            delegate.rebuild_entries();
+            delegate.append_matches(new_matches);
             cx.notify();
             ControlFlow::Continue(())
         });
@@ -378,6 +375,40 @@ impl Delegate {
             })
             .or_else(|| self.first_selectable_index())
             .unwrap_or(0);
+    }
+
+    fn append_matches(&mut self, matches: Vec<SearchMatch>) {
+        let select_first_new_match = self.first_selectable_index().is_none();
+        let mut last_path = self
+            .matches
+            .last()
+            .map(|search_match| search_match.path.clone());
+        let mut first_new_match_entry = None;
+
+        for search_match in matches {
+            let match_index = self.matches.len();
+            let is_collapsed = self.collapsed_paths.contains(&search_match.path);
+            if last_path.as_ref() != Some(&search_match.path) {
+                if !self.entries.is_empty() {
+                    self.entries.push(Entry::Separator);
+                }
+                self.entries.push(Entry::Header(search_match.path.clone()));
+                last_path = Some(search_match.path.clone());
+            }
+
+            self.max_line_number = self.max_line_number.max(search_match.line_number);
+            self.matches.push(search_match);
+
+            if !is_collapsed {
+                let entry_index = self.entries.len();
+                self.entries.push(Entry::Match(match_index));
+                first_new_match_entry.get_or_insert(entry_index);
+            }
+        }
+
+        if select_first_new_match {
+            self.selected_index = first_new_match_entry.unwrap_or(0);
+        }
     }
 
     fn first_selectable_index(&self) -> Option<usize> {
@@ -732,6 +763,7 @@ impl PickerDelegate for Delegate {
             self.unique_files.clear();
             self.collapsed_paths.clear();
             self.selected_index = 0;
+            self.max_line_number = 0;
             self.active_query = None;
             cx.notify();
             return Task::ready(());
@@ -1086,16 +1118,14 @@ async fn stream_results_to_picker(
                     delegate.unique_files.clear();
                     delegate.collapsed_paths.clear();
                     delegate.selected_index = 0;
+                    delegate.max_line_number = 0;
                     clear_existing = false;
                 }
 
                 delegate
                     .unique_files
                     .extend(batch_matches.iter().map(|m| &m.path).cloned());
-                delegate.matches.extend(batch_matches);
-                // Rebuild the grouped view and resnap the selection onto a
-                // selectable row (the header/separator rows are not selectable).
-                delegate.rebuild_entries();
+                delegate.append_matches(batch_matches);
 
                 cx.notify();
             })
