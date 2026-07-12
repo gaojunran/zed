@@ -1020,6 +1020,15 @@ impl ConversationView {
         cx.notify();
     }
 
+    /// Force a reconnect so the agent picks up a newly downloaded version,
+    /// then reset the thread. Called when the user clicks "Update".
+    fn restart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.connection_store.update(cx, |store, cx| {
+            store.restart_connection(self.connection_key.clone(), self.agent.clone(), cx);
+        });
+        self.reset(window, cx);
+    }
+
     fn initial_state(
         agent: Rc<dyn AgentServer>,
         connection_store: Entity<AgentConnectionStore>,
@@ -1070,8 +1079,11 @@ impl ConversationView {
         let thread_location = "current_worktree";
 
         let load_task = cx.spawn_in(window, async move |this, cx| {
-            let connection = match connect_result.await {
-                Ok(AgentConnectedState { connection, .. }) => connection,
+            let (connection, new_version_available) = match connect_result.await {
+                Ok(AgentConnectedState {
+                    connection,
+                    new_version_available,
+                }) => (connection, new_version_available),
                 Err(err) => {
                     this.update_in(cx, |this, window, cx| {
                         this.handle_load_error(err, window, cx);
@@ -1180,6 +1192,16 @@ impl ConversationView {
                             window,
                             cx,
                         );
+
+                        // If the reused connection already has a pending new
+                        // version, surface it on this thread so the user sees
+                        // the update callout.
+                        if let Some(version) = &new_version_available {
+                            current.update(cx, |view, cx| {
+                                view.new_server_version_available = Some(version.clone());
+                                cx.notify();
+                            });
+                        }
 
                         if this.focus_handle.contains_focused(window, cx) {
                             current

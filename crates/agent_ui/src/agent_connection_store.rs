@@ -26,6 +26,10 @@ pub enum AgentConnectionEntry {
 #[derive(Clone)]
 pub struct AgentConnectedState {
     pub connection: Rc<dyn AgentConnection>,
+    /// A newer version of this agent is available. When the connection is
+    /// reused by a new session, this lets the UI show the update callout
+    /// without forcing a reconnect.
+    pub new_version_available: Option<SharedString>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,13 +225,15 @@ impl AgentConnectionStore {
                         }
 
                         entry
-                            .update(cx, move |_entry, cx| {
+                            .update(cx, move |entry, cx| {
+                                if let AgentConnectionEntry::Connected(state) = entry {
+                                    state.new_version_available = Some(version.clone().into());
+                                }
                                 cx.emit(AgentConnectionEntryEvent::NewVersionAvailable(
                                     version.into(),
                                 ));
                             })
                             .ok();
-                        this.entries.remove(&key);
                         cx.notify();
                     })
                     .ok();
@@ -302,7 +308,10 @@ impl AgentConnectionStore {
 
         let connect_task = server.connect(delegate, self.project.clone(), cx);
         let connect_task = cx.spawn(async move |_this, _cx| match connect_task.await {
-            Ok(connection) => Ok(AgentConnectedState { connection }),
+            Ok(connection) => Ok(AgentConnectedState {
+                connection,
+                new_version_available: None,
+            }),
             Err(err) => match err.downcast::<LoadError>() {
                 Ok(load_error) => Err(load_error),
                 Err(err) => Err(LoadError::Other(SharedString::from(err.to_string()))),
