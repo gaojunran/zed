@@ -24,23 +24,46 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
   CARGO_INCREMENTAL: '0'
+  # Override the workspace release profile for faster personal-test builds.
+  # The upstream profile (thin LTO + codegen-units=1) is tuned for runtime
+  # performance and ships to users; for local testing we trade some runtime
+  # speed and binary size for ~2-3x faster compilation.
+  CARGO_PROFILE_RELEASE_LTO: 'false'
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+  CARGO_PROFILE_RELEASE_DEBUG: 'false'
+  # sccache caches individual compilation units by content hash, so crates
+  # unchanged across branches hit the cache even when cargo fingerprints
+  # differ (e.g. after switching ref).
+  RUSTC_WRAPPER: sccache
+  SCCACHE_DIR: /Users/runner/Library/Caches/sccache
+  SCCACHE_CACHE_SIZE: 20G
 jobs:
   bundle_mac:
     runs-on: macos-15
-    # A from-scratch release build on a 3-core hosted runner is slow; give it
-    # plenty of headroom (the hard per-job cap is 6h).
-    timeout-minutes: 300
+    # With profile overrides + sccache the build is much faster; keep headroom
+    # for the first cold run that populates caches.
+    timeout-minutes: 180
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       with:
         ref: ${{ inputs.ref }}
+    - name: Install sccache
+      run: brew install sccache
+    - name: Cache sccache
+      uses: actions/cache@v4
+      with:
+        path: /Users/runner/Library/Caches/sccache
+        key: sccache-${{ inputs.target }}-${{ github.sha }}
+        restore-keys: |
+          sccache-${{ inputs.target }}-
     # Cache heavy external dependencies (webrtc, tree-sitter, abseil, ...) so
-    # repeat runs are much faster. The first successful run populates it.
+    # repeat runs are much faster. The key suffix bumps when the profile
+    # overrides change to avoid restoring stale fingerprints.
     - name: Cache Rust build
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ inputs.target }}
+        key: ${{ inputs.target }}-profile-fast-v1
         cache-on-failure: 'true'
     # macos-15's default libc++ compiles webrtc-sys' cxx bridge; older images
     # (e.g. Xcode 15.4) fail a C++20 ranges static_assert. Pin latest stable.
@@ -54,6 +77,9 @@ jobs:
         node-version: '24'
     - name: Bundle macOS app
       run: ./script/bundle-mac ${{ inputs.target }}
+    - name: Show sccache stats
+      if: always()
+      run: sccache --show-stats
     - name: Upload DMG
       uses: actions/upload-artifact@v4
       with:
