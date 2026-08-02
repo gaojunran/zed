@@ -1,0 +1,88 @@
+name: build_mac_dmg
+# Manually-triggered macOS bundle build for personal testing.
+# Runs on GitHub-hosted macOS runners (which ship full Xcode, including the
+# `metal` shader compiler) and needs no signing/notarization secrets:
+# `script/bundle-mac` falls back to an ad-hoc signature when they are absent.
+#
+# This workflow lives only on the default branch. Use the `ref` input to pick
+# which branch/tag/SHA to build, so feature branches don't need to carry it.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build
+        type: string
+        default: inline-blame-diff-views
+      target:
+        description: Target triple to build
+        type: choice
+        default: aarch64-apple-darwin
+        options:
+        - aarch64-apple-darwin
+        - x86_64-apple-darwin
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: '0'
+  # Override the workspace release profile for faster personal-test builds.
+  # The upstream profile (thin LTO + codegen-units=1) is tuned for runtime
+  # performance and ships to users; for local testing we trade some runtime
+  # speed and binary size for ~2-3x faster compilation.
+  CARGO_PROFILE_RELEASE_LTO: 'false'
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+  CARGO_PROFILE_RELEASE_DEBUG: 'false'
+  # sccache caches individual compilation units by content hash, so crates
+  # unchanged across branches hit the cache even when cargo fingerprints
+  # differ (e.g. after switching ref).
+  RUSTC_WRAPPER: sccache
+  SCCACHE_DIR: /Users/runner/Library/Caches/sccache
+  SCCACHE_CACHE_SIZE: 20G
+jobs:
+  bundle_mac:
+    runs-on: macos-15
+    # With profile overrides + sccache the build is much faster; keep headroom
+    # for the first cold run that populates caches.
+    timeout-minutes: 180
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+    - name: Install sccache
+      run: brew install sccache
+    - name: Cache sccache
+      uses: actions/cache@v4
+      with:
+        path: /Users/runner/Library/Caches/sccache
+        key: sccache-${{ inputs.target }}-${{ github.sha }}
+        restore-keys: |
+          sccache-${{ inputs.target }}-
+    # Cache heavy external dependencies (webrtc, tree-sitter, abseil, ...) so
+    # repeat runs are much faster. The key suffix bumps when the profile
+    # overrides change to avoid restoring stale fingerprints.
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.target }}-profile-fast-v1
+        cache-on-failure: 'true'
+    # macos-15's default libc++ compiles webrtc-sys' cxx bridge; older images
+    # (e.g. Xcode 15.4) fail a C++20 ranges static_assert. Pin latest stable.
+    - name: Select Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Bundle macOS app
+      run: ./script/bundle-mac ${{ inputs.target }}
+    - name: Show sccache stats
+      if: always()
+      run: sccache --show-stats
+    - name: Upload DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: Zed-${{ inputs.target }}.dmg
+        path: target/${{ inputs.target }}/release/Zed-*.dmg
+        if-no-files-found: error
