@@ -126,7 +126,7 @@ impl EditorElement {
             && position_map
                 .inline_blame_bounds
                 .as_ref()
-                .is_some_and(|(bounds, _, _)| bounds.contains(&event.position));
+                .is_some_and(|(bounds, _, _, _)| bounds.contains(&event.position));
         if was_hovered_inline_blame != editor.hovered_inline_blame {
             cx.notify();
         }

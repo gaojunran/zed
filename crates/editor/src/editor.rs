@@ -3919,7 +3919,7 @@ impl Editor {
         self.hovered_inline_blame = position_map
             .inline_blame_bounds
             .as_ref()
-            .is_some_and(|(bounds, _, _)| bounds.contains(&mouse_position))
+            .is_some_and(|(bounds, _, _, _)| bounds.contains(&mouse_position))
             && Self::is_cmd_or_ctrl_pressed(&modifiers, cx);
         if was_hovered_inline_blame != self.hovered_inline_blame {
             cx.notify();
