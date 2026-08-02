@@ -3,7 +3,8 @@ use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::{
     Addon, Editor, EditorEvent, EditorSettings, MultiBuffer, RestoreOnlyDiffHunkDelegate,
-    SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    SelectionEffects, SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    scroll::Autoscroll,
 };
 use futures_lite::future::yield_now;
 use git::repository::{CommitDetails, CommitDiff, RepoPath, is_binary_content};
@@ -162,6 +163,7 @@ impl CommitView {
         workspace: WeakEntity<Workspace>,
         stash: Option<usize>,
         file_filter: Option<RepoPath>,
+        scroll_to: Option<(RepoPath, u32)>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -201,6 +203,7 @@ impl CommitView {
                                 workspace_entity,
                                 workspace_handle,
                                 stash,
+                                scroll_to,
                                 window,
                                 cx,
                             )
@@ -247,6 +250,7 @@ impl CommitView {
         workspace_entity: Entity<Workspace>,
         workspace: WeakEntity<Workspace>,
         stash: Option<usize>,
+        scroll_to: Option<(RepoPath, u32)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -294,12 +298,23 @@ impl CommitView {
             .map(|worktree| worktree.read(cx).id());
 
         let repository_clone = repository.clone();
+        let mut scroll_to = scroll_to;
+
+        // Process the target file first so the editor appears at the correct
+        // scroll position immediately, avoiding a visible jump for large commits.
+        let mut commit_diff = commit_diff;
+        if let Some((target_path, _)) = &scroll_to {
+            if let Some(pos) = commit_diff.files.iter().position(|f| f.path == *target_path) {
+                commit_diff.files.swap(0, pos);
+            }
+        }
 
         cx.spawn_in(window, async move |this, cx| {
             let mut binary_buffer_ids: HashSet<language::BufferId> = HashSet::default();
             let mut file_statuses: HashMap<language::BufferId, FileStatus> = HashMap::default();
 
             for file in commit_diff.files {
+                let file_path = file.path.clone();
                 let is_created = file.old_text.is_none();
                 let is_deleted = file.new_text.is_none();
                 let raw_new_text = file.new_text.unwrap_or_default();
@@ -429,6 +444,31 @@ impl CommitView {
                     })?;
                     if batch_end < total {
                         yield_now().await;
+                    }
+                }
+
+                if let Some((target_path, target_row)) = &scroll_to {
+                    if *target_path == file_path {
+                        let anchor = this.update(cx, |this, cx| {
+                            this.multibuffer
+                                .read(cx)
+                                .buffer_point_to_anchor(&buffer, language::Point::new(*target_row, 0), cx)
+                        })?;
+                        if let Some(anchor) = anchor {
+                            this.update_in(cx, |this, window, cx| {
+                                this.editor.update(cx, |editor, cx| {
+                                    editor.rhs_editor().update(cx, |editor, cx| {
+                                        editor.change_selections(
+                                            SelectionEffects::scroll(Autoscroll::center()),
+                                            window,
+                                            cx,
+                                            |s| s.select_ranges([anchor..anchor]),
+                                        );
+                                    });
+                                });
+                            })?;
+                            scroll_to = None;
+                        }
                     }
                 }
             }
