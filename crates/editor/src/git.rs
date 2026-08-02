@@ -2284,6 +2284,7 @@ impl Editor {
     pub fn open_inline_blame_commit(
         &mut self,
         buffer_id: BufferId,
+        buffer_row: u32,
         blame_entry: BlameEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2292,7 +2293,7 @@ impl Editor {
         let renderer = cx.global::<GlobalBlameRenderer>().0.clone();
         let repo = blame.read(cx).repository(cx, buffer_id)?;
         let workspace = self.workspace()?.downgrade();
-        renderer.open_blame_commit(blame_entry, repo, workspace, window, cx);
+        renderer.open_blame_commit(blame_entry, buffer_row, repo, workspace, window, cx);
         None
     }
 

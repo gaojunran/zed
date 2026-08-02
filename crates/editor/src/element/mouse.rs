@@ -967,11 +967,13 @@ impl EditorElement {
                 SelectionDragState::Dragging { .. }
             )
             && let Some(mouse_position) = event.mouse_position()
-            && let Some((bounds, buffer_id, blame_entry)) = &position_map.inline_blame_bounds
+            && let Some((bounds, buffer_id, buffer_row, blame_entry)) =
+                &position_map.inline_blame_bounds
             && bounds.contains(&mouse_position)
         {
             editor.open_inline_blame_commit(
                 *buffer_id,
+                *buffer_row,
                 blame_entry.clone(),
                 window,
                 cx,
