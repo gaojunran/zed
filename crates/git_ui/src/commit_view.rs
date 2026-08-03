@@ -372,6 +372,45 @@ impl CommitView {
             let mut binary_buffer_ids: HashSet<language::BufferId> = HashSet::default();
             let mut file_statuses: HashMap<language::BufferId, FileStatus> = HashMap::default();
 
+            // While excerpts stream in, the display map is only partially
+            // populated. Set an expected max row so manual scrolling and the
+            // scrollbar thumb reflect the final document size rather than being
+            // clamped to the partially-loaded content. Programmatic autoscroll
+            // (center) is unaffected — it always uses the real max row.
+            let expected_max_row: f64 = commit_diff
+                .files
+                .iter()
+                .map(|file| {
+                    if file.is_binary {
+                        1.0
+                    } else {
+                        let new_lines = file
+                            .new_text
+                            .as_ref()
+                            .map(|t| t.lines().count())
+                            .unwrap_or(0);
+                        let old_lines = file
+                            .old_text
+                            .as_ref()
+                            .map(|t| t.lines().count())
+                            .unwrap_or(0);
+                        new_lines.max(old_lines) as f64
+                    }
+                })
+                .sum();
+            this.update(cx, |this, cx| {
+                this.editor.update(cx, |editor, cx| {
+                    editor
+                        .rhs_editor()
+                        .update(cx, |editor, _cx| editor.set_expected_max_row(Some(expected_max_row)));
+                    if let Some(lhs_editor) = editor.lhs_editor() {
+                        lhs_editor.update(cx, |editor, _cx| {
+                            editor.set_expected_max_row(Some(expected_max_row))
+                        });
+                    }
+                });
+            })?;
+
             for file in commit_diff.files {
                 let file_path = file.path.clone();
                 let is_created = file.old_text.is_none();
@@ -543,7 +582,13 @@ impl CommitView {
                             file_statuses,
                             commit_view,
                         });
+                        editor.set_expected_max_row(None);
                     });
+                    if let Some(lhs_editor) = editor.lhs_editor() {
+                        lhs_editor.update(cx, |editor, _cx| {
+                            editor.set_expected_max_row(None)
+                        });
+                    }
                 });
                 if !binary_buffer_ids.is_empty() {
                     this.editor.update(cx, |editor, cx| {
