@@ -348,12 +348,23 @@ impl CommitView {
         let repository_clone = repository.clone();
         let mut scroll_to = scroll_to;
 
-        // Process the target file first so the editor appears at the correct
-        // scroll position immediately, avoiding a visible jump for large commits.
+        // Process the target file first so the blamed line is visible
+        // immediately, avoiding a jump from the top of the diff. Keep the
+        // remaining files sorted by path: files sorted above the target are
+        // inserted next (they shift the target's display row), followed by
+        // files sorted below it. The scroll anchor set when the target is
+        // selected tracks the target's buffer position, so later insertions
+        // keep the target row stable in the viewport.
         let mut commit_diff = commit_diff;
+        commit_diff.files.sort_by(|a, b| a.path.cmp(&b.path));
         if let Some((target_path, _)) = &scroll_to {
-            if let Some(pos) = commit_diff.files.iter().position(|f| f.path == *target_path) {
-                commit_diff.files.swap(0, pos);
+            if let Some(pos) = commit_diff
+                .files
+                .iter()
+                .position(|f| f.path == *target_path)
+            {
+                let target = commit_diff.files.remove(pos);
+                commit_diff.files.insert(0, target);
             }
         }
 
@@ -544,9 +555,11 @@ impl CommitView {
             })?;
 
             // All excerpts have been inserted and the display map is now stable.
-            // Replace a still-pending CenterWhenPossible request with a plain
-            // center() so a short diff settles at its final boundary. Do not
-            // request another scroll after the earlier attempt has succeeded.
+            // If the CenterWhenPossible request is still pending (the total
+            // content was too short to ever center the target), settle at the
+            // final boundary. If it was already consumed successfully, do
+            // nothing — set_anchor's equality short-circuit is not needed
+            // because we don't issue a second request.
             let has_pending_autoscroll = this.update(cx, |this, cx| {
                 this.editor.read(cx).rhs_editor().read(cx).has_autoscroll_request()
             })?;
