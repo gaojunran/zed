@@ -2,8 +2,9 @@ use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::{
-    Addon, Editor, EditorEvent, EditorSettings, MultiBuffer, RestoreOnlyDiffHunkDelegate,
-    SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    Addon, BlameRevisions, Editor, EditorEvent, EditorSettings, MultiBuffer,
+    RestoreOnlyDiffHunkDelegate, SplittableEditor, hover_markdown_style,
+    multibuffer_context_lines,
 };
 use futures_lite::future::yield_now;
 use git::repository::{CommitDetails, RepoPath};
@@ -311,6 +312,24 @@ impl CommitView {
             editor
         });
         let commit_sha = Arc::<str>::from(commit.sha.as_ref());
+
+        // Blame the commit's content at the commit itself, and blame deleted
+        // lines (the diff base text) at the parent commit, so each line shows the
+        // commit that introduced it rather than "not committed yet".
+        let buffer_revision = git::repository::BlameRevision::Revision(commit_sha.to_string());
+        let base_text_revision = git::repository::BlameRevision::Revision(format!("{commit_sha}^"));
+        editor.update(cx, |editor, cx| {
+            editor.set_blame_revisions(
+                BlameRevisions {
+                    blame_base_text: true,
+                    base_text_revision: Some(base_text_revision),
+                    buffer_revision: Some(buffer_revision),
+                    hide_blame_on_added_rows: true,
+                },
+                window,
+                cx,
+            );
+        });
 
         let repository_clone = repository.clone();
         let project_clone = project.clone();

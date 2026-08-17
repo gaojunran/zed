@@ -36,6 +36,14 @@ impl Blame {
         path: &RepoPath,
         revision: Oid,
     ) -> Result<Self> {
+        Self::for_path_at_revision_str(git, path, &revision.to_string()).await
+    }
+
+    pub(crate) async fn for_path_at_revision_str(
+        git: &GitBinary,
+        path: &RepoPath,
+        revision: &str,
+    ) -> Result<Self> {
         let entries = run_git_blame(git, path, BlameSource::Revision(revision)).await?;
         Self::with_commit_details(git, entries).await
     }
@@ -78,7 +86,7 @@ const BLAME_PARSE_YIELD_INTERVAL: usize = 512;
 #[derive(Clone, Copy)]
 enum BlameSource<'a> {
     Contents(&'a Rope, LineEnding),
-    Revision(Oid),
+    Revision(&'a str),
 }
 
 async fn run_git_blame(
@@ -90,13 +98,9 @@ async fn run_git_blame(
         let span = ztracing::debug_span!("spawning git-blame command", path = path.as_unix_str());
         let _enter = span.enter();
         let mut args = vec!["blame", "--incremental"];
-        let revision_string;
         match source {
             BlameSource::Contents(..) => args.extend(["--contents", "-"]),
-            BlameSource::Revision(revision) => {
-                revision_string = revision.to_string();
-                args.push(&revision_string);
-            }
+            BlameSource::Revision(revision) => args.push(revision),
         }
         args.push("--");
         git.build_command(&args)

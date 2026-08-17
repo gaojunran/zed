@@ -1280,4 +1280,111 @@ mod tests {
         assert_eq!(active_base_ref, "origin/main");
         assert_eq!(base_refs, vec!["origin/main", "topic"]);
     }
+
+    #[gpui::test]
+    async fn test_branch_diff_updates_blame_revisions_when_diff_base_changes(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "a.txt": "changed",
+            }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/project").as_ref()], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+        let diff = cx
+            .update(|window, cx| {
+                let Some(repository) = project.read(cx).active_repository(cx) else {
+                    return Task::ready(Err(anyhow!("No active repository")));
+                };
+                BranchDiff::new_with_branch_base(
+                    project.clone(),
+                    workspace.clone(),
+                    "origin/main".into(),
+                    repository,
+                    None,
+                    window,
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        cx.run_until_parked();
+
+        diff.update_in(cx, |diff, window, cx| {
+            let editor = diff.editor(cx);
+            editor.update(cx, |editor, cx| {
+                editor.split(window, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        let (rhs_blame_revisions, lhs_blame_revisions) = diff.read_with(cx, |diff, cx| {
+            let editor = diff.editor(cx);
+            let rhs_blame_revisions = editor.read(cx).rhs_editor().read(cx).blame_revisions().clone();
+            let lhs_blame_revisions = editor
+                .read(cx)
+                .lhs_editor()
+                .unwrap()
+                .read(cx)
+                .blame_revisions()
+                .clone();
+            (rhs_blame_revisions, lhs_blame_revisions)
+        });
+
+        assert_eq!(
+            rhs_blame_revisions.base_text_revision,
+            Some(git::repository::BlameRevision::MergeBaseWithHead {
+                base_ref: "origin/main".to_string(),
+            })
+        );
+        assert!(!rhs_blame_revisions.hide_blame_on_added_rows);
+        assert_eq!(
+            lhs_blame_revisions.buffer_revision,
+            Some(git::repository::BlameRevision::MergeBaseWithHead {
+                base_ref: "origin/main".to_string(),
+            })
+        );
+
+        diff.update(cx, |diff, cx| {
+            diff.set_merge_base("topic".into(), cx);
+        });
+        cx.run_until_parked();
+
+        let (rhs_blame_revisions, lhs_blame_revisions) = diff.read_with(cx, |diff, cx| {
+            let editor = diff.editor(cx);
+            let rhs_blame_revisions = editor.read(cx).rhs_editor().read(cx).blame_revisions().clone();
+            let lhs_blame_revisions = editor
+                .read(cx)
+                .lhs_editor()
+                .unwrap()
+                .read(cx)
+                .blame_revisions()
+                .clone();
+            (rhs_blame_revisions, lhs_blame_revisions)
+        });
+
+        assert_eq!(
+            rhs_blame_revisions.base_text_revision,
+            Some(git::repository::BlameRevision::MergeBaseWithHead {
+                base_ref: "topic".to_string(),
+            })
+        );
+        assert!(!rhs_blame_revisions.hide_blame_on_added_rows);
+        assert_eq!(
+            lhs_blame_revisions.buffer_revision,
+            Some(git::repository::BlameRevision::MergeBaseWithHead {
+                base_ref: "topic".to_string(),
+            })
+        );
+    }
 }

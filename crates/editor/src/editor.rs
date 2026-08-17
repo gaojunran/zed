@@ -106,7 +106,7 @@ pub use element::{
     CursorLayout, EditorElement, HighlightedRange, HighlightedRangeLine, PointForPosition,
     file_status_label_color, render_breadcrumb_text,
 };
-pub use git::blame::{BlameRenderer, GitBlame};
+pub use git::blame::{BlameRenderer, BlameRevisions, GitBlame};
 pub use git::{
     DiffHunkDelegate, ResolvedDiffHunk, ResolvedDiffHunks, RestoreOnlyDiffHunkDelegate,
     RestoreOnlyUnstagedDiffHunkDelegate, UncommittedDiffHunkDelegate, render_diff_hunk_controls,
@@ -1075,6 +1075,7 @@ pub struct Editor {
     show_git_blame_inline: bool,
     show_git_blame_inline_delay_task: Option<Task<()>>,
     git_blame_inline_enabled: bool,
+    blame_revisions: BlameRevisions,
     buffer_serialization: Option<BufferSerialization>,
     show_selection_menu: Option<bool>,
     blame: Option<Entity<GitBlame>>,
@@ -2400,6 +2401,7 @@ impl Editor {
             show_git_blame_inline_delay_task: None,
             git_blame_inline_enabled: full_mode
                 && ProjectSettings::get_global(cx).git.inline_blame.enabled,
+            blame_revisions: BlameRevisions::default(),
             buffer_serialization: is_minimap.not().then(|| {
                 BufferSerialization::new(
                     ProjectSettings::get_global(cx)

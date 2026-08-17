@@ -67,6 +67,8 @@ pub struct FakeGitRepositoryState {
     pub oids: HashMap<Oid, Vec<u8>>,
     pub blames: HashMap<RepoPath, Blame>,
     pub blames_at_revision: HashMap<(RepoPath, Oid), Blame>,
+    /// Blame keyed by `(revision, path)`, used when blaming a specific revision.
+    pub blames_by_revision: HashMap<(String, RepoPath), Blame>,
     pub current_branch_name: Option<String>,
     pub branches: HashSet<String>,
     /// List of remotes, keys are names and values are URLs
@@ -92,6 +94,7 @@ impl FakeGitRepositoryState {
             unmerged_paths: Default::default(),
             blames: Default::default(),
             blames_at_revision: Default::default(),
+            blames_by_revision: Default::default(),
             current_branch_name: Default::default(),
             branches: Default::default(),
             simulated_index_write_error_message: Default::default(),
@@ -1007,6 +1010,26 @@ impl GitRepository for FakeGitRepository {
                 .blames_at_revision
                 .get(&(path.clone(), revision))
                 .with_context(|| format!("failed to get blame for {path:?} at {revision}"))
+                .cloned()
+        })
+    }
+
+    fn blame_path(
+        &self,
+        path: RepoPath,
+        revision: git::repository::BlameRevision,
+    ) -> BoxFuture<'_, Result<git::blame::Blame>> {
+        let revision = match revision {
+            git::repository::BlameRevision::Revision(revision) => revision,
+            git::repository::BlameRevision::MergeBaseWithHead { base_ref } => {
+                format!("merge-base:{base_ref}")
+            }
+        };
+        self.with_state_async(false, move |state| {
+            state
+                .blames_by_revision
+                .get(&(revision.clone(), path.clone()))
+                .with_context(|| format!("failed to get blame for {:?} at {:?}", path, revision))
                 .cloned()
         })
     }

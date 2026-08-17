@@ -7,8 +7,8 @@ use anyhow::Result;
 use buffer_diff::BufferDiff;
 use collections::{HashMap, HashSet};
 use editor::{
-    EditorEvent, EditorSettings, SelectionEffects, SplittableEditor, actions::GoToHunk,
-    multibuffer_context_lines, scroll::Autoscroll,
+    BlameRevisions, EditorEvent, EditorSettings, SelectionEffects, SplittableEditor,
+    actions::GoToHunk, multibuffer_context_lines, scroll::Autoscroll,
 };
 use futures_lite::future::yield_now;
 use git::{repository::RepoPath, status::FileStatus};
@@ -59,6 +59,37 @@ pub struct DiffMultibuffer {
 }
 
 impl DiffMultibuffer {
+    fn blame_revisions_for_diff_base(diff_base: &DiffBase) -> BlameRevisions {
+        let (base_text_revision, hide_blame_on_added_rows) = match diff_base {
+            // The diff base text for these is HEAD (or close to it), so the
+            // default revision blames it correctly. Added rows are uncommitted
+            // edits whose blame would only read "not committed yet".
+            DiffBase::Head | DiffBase::Index | DiffBase::Staged => (None, true),
+            DiffBase::Merge { base_ref } => {
+                (
+                    Some(git::repository::BlameRevision::MergeBaseWithHead {
+                        base_ref: base_ref.to_string(),
+                    }),
+                    false,
+                )
+            }
+        };
+        BlameRevisions {
+            blame_base_text: true,
+            base_text_revision,
+            buffer_revision: None,
+            hide_blame_on_added_rows,
+        }
+    }
+
+    fn sync_blame_revisions(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let blame_revisions =
+            Self::blame_revisions_for_diff_base(self.branch_diff.read(cx).diff_base());
+        self.editor.update(cx, |editor, cx| {
+            editor.set_blame_revisions(blame_revisions, window, cx);
+        });
+    }
+
     pub(crate) fn new(
         branch_diff: Entity<diff_buffer_list::DiffBufferList>,
         multibuffer_capability: Capability,
@@ -112,6 +143,7 @@ impl DiffMultibuffer {
                     })
                 }
                 BranchDiffEvent::DiffBaseChanged => {
+                    this.sync_blame_revisions(window, cx);
                     this.pending_scroll.take();
                     this._task = window.spawn(cx, {
                         let this = cx.weak_entity();
@@ -156,7 +188,7 @@ impl DiffMultibuffer {
             async |cx| Self::refresh(this, cx).await
         });
 
-        Self {
+        let this = Self {
             workspace: workspace.downgrade(),
             branch_diff,
             focus_handle,
@@ -171,7 +203,9 @@ impl DiffMultibuffer {
                 branch_diff_subscription,
                 Subscription::join(editor_subscription, review_comment_subscription),
             ),
-        }
+        };
+        this.sync_blame_revisions(window, cx);
+        this
     }
 
     pub(crate) fn diff_base<'a>(&'a self, cx: &'a App) -> &'a DiffBase {

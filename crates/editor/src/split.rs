@@ -609,12 +609,55 @@ struct LhsEditor {
 }
 
 impl SplittableEditor {
+    fn lhs_blame_revisions(
+        rhs_blame_revisions: &crate::BlameRevisions,
+    ) -> Option<crate::BlameRevisions> {
+        rhs_blame_revisions
+            .blame_base_text
+            .then(|| crate::BlameRevisions {
+                blame_base_text: false,
+                base_text_revision: None,
+                buffer_revision: Some(
+                    rhs_blame_revisions
+                        .base_text_revision
+                        .clone()
+                        .unwrap_or(git::repository::BlameRevision::Revision("HEAD".to_string())),
+                ),
+                hide_blame_on_added_rows: false,
+            })
+    }
+
     pub fn rhs_editor(&self) -> &Entity<Editor> {
         &self.rhs_editor
     }
 
     pub fn lhs_editor(&self) -> Option<&Entity<Editor>> {
         self.lhs.as_ref().map(|s| &s.editor)
+    }
+
+    pub fn set_blame_revisions(
+        &self,
+        revisions: crate::BlameRevisions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.rhs_editor.update(cx, |editor, cx| {
+            editor.set_blame_revisions(revisions, window, cx);
+        });
+        self.sync_lhs_blame_revisions(window, cx);
+    }
+
+    fn sync_lhs_blame_revisions(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lhs) = &self.lhs else {
+            return;
+        };
+        let rhs_blame_revisions = self.rhs_editor.read(cx).blame_revisions().clone();
+        let Some(lhs_blame_revisions) = Self::lhs_blame_revisions(&rhs_blame_revisions) else {
+            return;
+        };
+        lhs.editor.update(cx, |editor, cx| {
+            editor.set_blame_revisions(lhs_blame_revisions, window, cx);
+        });
     }
 
     pub fn update_editors(
@@ -801,6 +844,15 @@ impl SplittableEditor {
             editor
         });
 
+        // The lhs editor is created lazily here, after the splittable editor was
+        // added to the workspace, so it needs the workspace wired up itself (for
+        // e.g. the blame popover).
+        workspace.update(cx, |workspace, cx| {
+            lhs_editor.update(cx, |lhs_editor, cx| {
+                lhs_editor.added_to_workspace(workspace, window, cx);
+            });
+        });
+
         let mut subscriptions = vec![cx.subscribe_in(
             &lhs_editor,
             window,
@@ -906,6 +958,7 @@ impl SplittableEditor {
         self.lhs = Some(lhs);
 
         self.sync_lhs_for_paths(all_paths, cx);
+        self.sync_lhs_blame_revisions(window, cx);
 
         rhs_display_map.update(cx, |dm, cx| {
             dm.set_companion(Some((lhs_display_map, companion.clone())), cx);
