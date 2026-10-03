@@ -127,6 +127,7 @@ pub(super) struct InlineBlamePopoverState {
     pub(super) scroll_handle: ScrollHandle,
     pub(super) commit_message: Option<ParsedCommitMessage>,
     pub(super) markdown: Entity<Markdown>,
+    pub(super) buffer_row: u32,
 }
 
 pub(super) struct InlineBlamePopover {
@@ -846,6 +847,7 @@ impl Editor {
         if let (Some(position), Some(last_bounds)) = (position, self.last_bounds) {
             self.show_blame_popover(
                 buffer,
+                point.row,
                 &blame_entry,
                 position + last_bounds.origin,
                 true,
@@ -1988,6 +1990,7 @@ impl Editor {
     pub(super) fn show_blame_popover(
         &mut self,
         buffer: BufferId,
+        buffer_row: u32,
         blame_entry: &BlameEntry,
         position: gpui::Point<Pixels>,
         ignore_timeout: bool,
@@ -2031,6 +2034,7 @@ impl Editor {
                                 scroll_handle: ScrollHandle::new(),
                                 commit_message: details,
                                 markdown,
+                                buffer_row,
                             },
                             keyboard_grace: ignore_timeout,
                         });
@@ -2248,10 +2252,10 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<()> {
-        let (blame_entry, repo) = self.blame_entry_at_cursor(window, cx)?;
+        let (blame_entry, buffer_row, repo) = self.blame_entry_at_cursor(window, cx)?;
         let renderer = cx.global::<GlobalBlameRenderer>().0.clone();
         let workspace = self.workspace()?.downgrade();
-        renderer.open_blame_commit(blame_entry, repo, workspace, window, cx);
+        renderer.open_blame_commit(blame_entry, buffer_row, repo, workspace, window, cx);
         None
     }
 
@@ -2259,7 +2263,7 @@ impl Editor {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<(BlameEntry, Entity<Repository>)> {
+    ) -> Option<(BlameEntry, u32, Entity<Repository>)> {
         let blame = self.blame.clone()?;
         let snapshot = self.snapshot(window, cx);
         let cursor = self
@@ -2267,13 +2271,14 @@ impl Editor {
             .newest::<Point>(&snapshot.display_snapshot)
             .head();
         let (buffer, point) = snapshot.buffer_snapshot().point_to_buffer_point(cursor)?;
+        let buffer_row = point.row;
         let (_, blame_entry) = blame
             .update(cx, |blame, cx| {
                 blame
                     .blame_for_rows(
                         &[RowInfo {
                             buffer_id: Some(buffer.remote_id()),
-                            buffer_row: Some(point.row),
+                            buffer_row: Some(buffer_row),
                             ..Default::default()
                         }],
                         cx,
@@ -2282,7 +2287,7 @@ impl Editor {
             })
             .flatten()?;
         let repository = blame.read(cx).repository(cx, buffer.remote_id())?;
-        Some((blame_entry, repository))
+        Some((blame_entry, buffer_row, repository))
     }
 
     pub(crate) fn blame_revision_target(
@@ -2290,7 +2295,7 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<(RepoPath, Oid, Entity<Repository>)> {
-        let (blame_entry, repository) = self.blame_entry_at_cursor(window, cx)?;
+        let (blame_entry, _, repository) = self.blame_entry_at_cursor(window, cx)?;
         let highlighted_sha = self
             .blame
             .as_ref()
@@ -2304,7 +2309,7 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<(RepoPath, Oid, Entity<Repository>)> {
-        let (blame_entry, repository) = self.blame_entry_at_cursor(window, cx)?;
+        let (blame_entry, _, repository) = self.blame_entry_at_cursor(window, cx)?;
         let (revision, path) = blame_entry.previous_revision_target()?;
         Some((path, revision, repository))
     }

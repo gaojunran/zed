@@ -30,7 +30,7 @@ use workspace::{
 use zed_actions;
 
 use crate::{
-    commit_view::CommitView,
+    commit_view::{CommitView, CommitViewOptions},
     git_panel::{GitPanel, GitStatusEntry, RemoteOperationKind},
     solo_diff_view::SoloDiffView,
     text_diff_view::TextDiffView,
@@ -61,6 +61,7 @@ pub mod text_diff_view;
 pub mod unstaged_diff;
 
 pub use blame_ui::GitBlameStatus;
+pub(crate) use blame_ui::blame_entry_scroll_target;
 pub use conflict_view::MergeConflictIndicator;
 
 pub fn init(cx: &mut App) {
@@ -802,8 +803,7 @@ impl RefPickerModal {
                                 details.sha.to_string(),
                                 repo.downgrade(),
                                 workspace.weak_handle(),
-                                None,
-                                None,
+                                CommitViewOptions::default(),
                                 window,
                                 cx,
                             );

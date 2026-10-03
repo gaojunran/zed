@@ -1,4 +1,4 @@
-use crate::commit_view::CommitView;
+use crate::commit_view::{CommitView, CommitViewOptions};
 use git::Oid;
 use gpui::{Action, ClipboardItem, Entity, FocusHandle, SharedString, WeakEntity, Window, actions};
 use project::{GIT_COMMAND_TASK_TAG, git_store::Repository};
@@ -70,8 +70,7 @@ pub(crate) fn commit_context_menu(
                         sha.to_string(),
                         repository,
                         workspace.clone(),
-                        None,
-                        None,
+                        CommitViewOptions::default(),
                         window,
                         cx,
                     );

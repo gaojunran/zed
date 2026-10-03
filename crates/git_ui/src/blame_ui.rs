@@ -1,6 +1,8 @@
 use crate::{
     commit_tooltip::{CommitAvatar, CommitTooltip, commit_tag_chips, shallow_boundary_notice},
-    commit_view::{CommitView, GitBlob, build_buffer, worktree_id_for_repo_path},
+    commit_view::{
+        CommitView, CommitViewOptions, GitBlob, build_buffer, worktree_id_for_repo_path,
+    },
 };
 use anyhow::Context as _;
 use editor::{BlameRenderer, Editor, GitBlame, MultiBuffer, hover_markdown_style};
@@ -160,6 +162,7 @@ impl BlameRenderer for GitBlameRenderer {
         workspace: WeakEntity<Workspace>,
         editor: Entity<Editor>,
         ix: usize,
+        buffer_row: u32,
         sha_color: Hsla,
         window: &mut Window,
         cx: &mut App,
@@ -250,8 +253,13 @@ impl BlameRenderer for GitBlameRenderer {
                                     blame_entry.sha.to_string(),
                                     repository.downgrade(),
                                     workspace.clone(),
-                                    None,
-                                    None,
+                                    CommitViewOptions {
+                                        scroll_to: blame_entry_scroll_target(
+                                            &blame_entry,
+                                            buffer_row,
+                                        ),
+                                        ..Default::default()
+                                    },
                                     window,
                                     cx,
                                 )
@@ -262,6 +270,7 @@ impl BlameRenderer for GitBlameRenderer {
                                 cx.new(|cx| {
                                     CommitTooltip::blame_entry(
                                         &blame_entry,
+                                        buffer_row,
                                         details.clone(),
                                         tag_names.clone(),
                                         repository.clone(),
@@ -302,6 +311,7 @@ impl BlameRenderer for GitBlameRenderer {
     fn render_blame_entry_popover(
         &self,
         blame: BlameEntry,
+        buffer_row: u32,
         scroll_handle: ScrollHandle,
         details: Option<ParsedCommitMessage>,
         tag_names: Vec<SharedString>,
@@ -486,17 +496,26 @@ impl BlameRenderer for GitBlameRenderer {
                                                         .size(IconSize::Small)
                                                         .color(Color::Muted),
                                                 )
-                                                .on_click(move |_, window, cx| {
-                                                    CommitView::open(
-                                                        commit_summary.sha.clone().into(),
-                                                        repository.downgrade(),
-                                                        workspace.clone(),
-                                                        None,
-                                                        None,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                    cx.stop_propagation();
+                                                .on_click({
+                                                    let blame = blame.clone();
+                                                    move |_, window, cx| {
+                                                        let scroll_target =
+                                                            blame_entry_scroll_target(
+                                                                &blame, buffer_row,
+                                                            );
+                                                        CommitView::open(
+                                                            commit_summary.sha.clone().into(),
+                                                            repository.downgrade(),
+                                                            workspace.clone(),
+                                                            CommitViewOptions {
+                                                                scroll_to: scroll_target,
+                                                                ..Default::default()
+                                                            },
+                                                            window,
+                                                            cx,
+                                                        );
+                                                        cx.stop_propagation();
+                                                    }
                                                 }),
                                             )
                                             .child(Divider::vertical())
@@ -515,6 +534,7 @@ impl BlameRenderer for GitBlameRenderer {
     fn open_blame_commit(
         &self,
         blame_entry: BlameEntry,
+        buffer_row: u32,
         repository: Entity<Repository>,
         workspace: WeakEntity<Workspace>,
         window: &mut Window,
@@ -524,8 +544,10 @@ impl BlameRenderer for GitBlameRenderer {
             blame_entry.sha.to_string(),
             repository.downgrade(),
             workspace,
-            None,
-            None,
+            CommitViewOptions {
+                scroll_to: blame_entry_scroll_target(&blame_entry, buffer_row),
+                ..Default::default()
+            },
             window,
             cx,
         )
@@ -773,4 +795,19 @@ fn blame_entry_relative_timestamp(blame_entry: &BlameEntry) -> String {
         }
         Err(_) => "Error parsing date".to_string(),
     }
+}
+
+/// Returns the file and row to scroll to in the commit view for a blame
+/// entry, where `clicked_row` is the buffer row the entry was rendered for.
+pub(crate) fn blame_entry_scroll_target(
+    blame_entry: &BlameEntry,
+    clicked_row: u32,
+) -> Option<(RepoPath, u32)> {
+    let path = RepoPath::new(&blame_entry.filename).ok()?;
+    let group_offset = clicked_row.saturating_sub(blame_entry.range.start);
+    let row = blame_entry
+        .original_line_number
+        .saturating_sub(1)
+        .saturating_add(group_offset);
+    Some((path, row))
 }

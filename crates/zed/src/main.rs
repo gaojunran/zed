@@ -1241,8 +1241,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                                         sha,
                                         repo.downgrade(),
                                         workspace.weak_handle(),
-                                        None,
-                                        None,
+                                        git_ui::commit_view::CommitViewOptions::default(),
                                         window,
                                         cx,
                                     );

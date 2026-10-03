@@ -6,7 +6,7 @@ use crate::commit_context_menu::{
 };
 use crate::commit_modal::CommitModal;
 use crate::commit_tooltip::{CommitAvatar, CommitTooltip};
-use crate::commit_view::CommitView;
+use crate::commit_view::{CommitView, CommitViewOptions};
 use crate::git_panel_settings::GitPanelScrollbarAccessor;
 use crate::project_diff::{DeployBranchDiff, Diff, ProjectDiff};
 use crate::remote_output::{self, RemoteAction, SuccessMessage};
@@ -7109,8 +7109,7 @@ impl GitPanel {
                                     commit.sha.to_string(),
                                     repo.clone(),
                                     workspace.clone(),
-                                    None,
-                                    None,
+                                    CommitViewOptions::default(),
                                     window,
                                     cx,
                                 );
@@ -7330,8 +7329,7 @@ impl GitPanel {
             entry.sha.to_string(),
             active_repository.downgrade(),
             self.workspace.clone(),
-            None,
-            None,
+            CommitViewOptions::default(),
             window,
             cx,
         );
@@ -7822,8 +7820,7 @@ impl GitPanel {
                                                 sha_for_click.clone(),
                                                 repo.clone(),
                                                 workspace.clone(),
-                                                None,
-                                                None,
+                                                CommitViewOptions::default(),
                                                 window,
                                                 cx,
                                             );

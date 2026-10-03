@@ -3,7 +3,8 @@ use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::{
     Addon, Editor, EditorEvent, EditorSettings, HiddenDiffHunkRenderer, MultiBuffer,
-    SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    SelectionEffects, SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    scroll::Autoscroll,
 };
 use futures_lite::future::yield_now;
 use git::repository::{CommitDetails, RepoPath};
@@ -179,41 +180,32 @@ impl Addon for CommitDiffAddon {
 
 const FILE_NAMESPACE_SORT_PREFIX: u64 = 1;
 
+/// Options for opening a commit view.
+#[derive(Clone, Debug, Default)]
+pub struct CommitViewOptions {
+    /// The index of the stash to show, if this view is for a stash.
+    pub stash: Option<usize>,
+    /// Only show the diff for this file.
+    pub file_filter: Option<RepoPath>,
+    /// Scroll to this zero-based row in this file's committed contents
+    /// once its diff excerpt is inserted.
+    pub scroll_to: Option<(RepoPath, u32)>,
+    /// Load the diff past a shallow clone boundary.
+    pub ignore_shallow_boundary: bool,
+}
+
 impl CommitView {
     pub fn open(
         commit_sha: String,
         repo: WeakEntity<Repository>,
         workspace: WeakEntity<Workspace>,
-        stash: Option<usize>,
-        file_filter: Option<RepoPath>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        Self::open_with_options(
-            commit_sha,
-            repo,
-            workspace,
-            stash,
-            file_filter,
-            false,
-            window,
-            cx,
-        )
-    }
-
-    fn open_with_options(
-        commit_sha: String,
-        repo: WeakEntity<Repository>,
-        workspace: WeakEntity<Workspace>,
-        stash: Option<usize>,
-        file_filter: Option<RepoPath>,
-        ignore_shallow_boundary: bool,
+        options: CommitViewOptions,
         window: &mut Window,
         cx: &mut App,
     ) {
         let commit_diff = repo
             .update(cx, |repo, cx| {
-                repo.load_commit_diff(commit_sha.clone(), ignore_shallow_boundary, cx)
+                repo.load_commit_diff(commit_sha.clone(), options.ignore_shallow_boundary, cx)
             })
             .ok();
         let commit_details = repo
@@ -229,7 +221,7 @@ impl CommitView {
                 let commit_details = commit_details.log_err()?;
 
                 // Filter to specific file if requested
-                if let Some(ref filter_path) = file_filter {
+                if let Some(ref filter_path) = options.file_filter {
                     commit_diff.files.retain(|f| &f.path == filter_path);
                 }
 
@@ -248,8 +240,7 @@ impl CommitView {
                                 project.clone(),
                                 workspace_entity,
                                 workspace_handle,
-                                stash,
-                                file_filter,
+                                options,
                                 window,
                                 cx,
                             )
@@ -290,16 +281,21 @@ impl CommitView {
 
     fn new(
         commit: CommitDetails,
-        commit_diff: CommitDiff,
+        mut commit_diff: CommitDiff,
         repository: Entity<Repository>,
         project: Entity<Project>,
         workspace_entity: Entity<Workspace>,
         workspace: WeakEntity<Workspace>,
-        stash: Option<usize>,
-        file_filter: Option<RepoPath>,
+        options: CommitViewOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let CommitViewOptions {
+            stash,
+            file_filter,
+            mut scroll_to,
+            ignore_shallow_boundary: _,
+        } = options;
         let language_registry = project.read(cx).languages().clone();
         let is_shallow_boundary = commit_diff.is_shallow_boundary;
         let multibuffer = cx.new(|cx| {
@@ -341,11 +337,33 @@ impl CommitView {
         let repository_clone = repository.clone();
         let project_clone = project.clone();
 
+        if let Some((target_path, _)) = &scroll_to {
+            // Insert the target file's excerpts before the rest, so the
+            // autoscroll request set for it below lands on the first frame
+            // that shows diff content, before the remaining files load. The
+            // remaining files are sorted to match their display order.
+            commit_diff.files.sort_by(|a, b| a.path.cmp(&b.path));
+            if let Some(target_index) = commit_diff
+                .files
+                .iter()
+                .position(|f| f.path == *target_path)
+            {
+                let target_file = commit_diff.files.remove(target_index);
+                commit_diff.files.insert(0, target_file);
+            }
+        }
+
         let load_diff_task = cx.spawn_in(window, async move |this, cx| {
             let mut binary_buffer_ids: HashSet<language::BufferId> = HashSet::default();
             let mut file_statuses: HashMap<language::BufferId, FileStatus> = HashMap::default();
 
             for file in commit_diff.files {
+                let scroll_target_row = match &scroll_to {
+                    Some((target_path, target_row)) if *target_path == file.path => {
+                        Some(*target_row)
+                    }
+                    _ => None,
+                };
                 let is_created = file.old_text.is_none();
                 let is_deleted = file.new_text.is_none();
                 let raw_new_text = file.new_text.unwrap_or_default();
@@ -474,6 +492,34 @@ impl CommitView {
                         yield_now().await;
                     }
                 }
+
+                if let Some(target_row) = scroll_target_row {
+                    this.update_in(cx, |this, window, cx| {
+                        let Some(anchor) = this.multibuffer.read(cx).buffer_point_to_anchor(
+                            &buffer,
+                            language::Point::new(target_row, 0),
+                            cx,
+                        ) else {
+                            return;
+                        };
+                        this.editor.update(cx, |editor, cx| {
+                            editor.rhs_editor().update(cx, |editor, cx| {
+                                // The request is consumed by the next layout,
+                                // which knows the viewport height, and the
+                                // scroll anchor it installs follows the line
+                                // as later excerpts are inserted above it.
+                                editor.change_selections(
+                                    SelectionEffects::scroll(Autoscroll::center())
+                                        .nav_history(false),
+                                    window,
+                                    cx,
+                                    |s| s.select_ranges([anchor..anchor]),
+                                );
+                            });
+                        });
+                    })?;
+                    scroll_to = None;
+                }
             }
 
             this.update(cx, |this, cx| {
@@ -593,13 +639,15 @@ impl CommitView {
                                         .spawn(cx, async move |cx| {
                                             fetch.await?;
                                             cx.update(|window, cx| {
-                                                Self::open_with_options(
+                                                Self::open(
                                                     commit_sha,
                                                     repository,
                                                     workspace,
-                                                    stash,
-                                                    file_filter,
-                                                    false,
+                                                    CommitViewOptions {
+                                                        stash,
+                                                        file_filter,
+                                                        ..Default::default()
+                                                    },
                                                     window,
                                                     cx,
                                                 )
@@ -625,13 +673,16 @@ impl CommitView {
                                 "Show every file at this commit as added. This can be slow in large repositories."
                             }))
                             .on_click(move |_, window, cx| {
-                                Self::open_with_options(
+                                Self::open(
                                     commit_sha.clone(),
                                     repository.downgrade(),
                                     workspace.clone(),
-                                    stash,
-                                    file_filter.clone(),
-                                    true,
+                                    CommitViewOptions {
+                                        stash,
+                                        file_filter: file_filter.clone(),
+                                        ignore_shallow_boundary: true,
+                                        ..Default::default()
+                                    },
                                     window,
                                     cx,
                                 );
